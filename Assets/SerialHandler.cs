@@ -1,9 +1,4 @@
-﻿#define DEBUG
-#undef DEBUG
-#define RADIAN
-#undef RADIAN
-
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -12,17 +7,11 @@ using System.Threading;
 using UnityEngine;
 using static CalcRotation;
 
-#if (DEBUG)
-
-using static System.Math;
-using static SensorData;
-using static RotateData;
-
-#endif
-
 public class SerialHandler : MonoBehaviour
 {
-	public GameObject cube;
+	public GameObject cube1, cube2, cube3;
+
+	public double alpha1, alpha2, alpha3; // 回転の混合割合
 
 	public string portName = "COM3"; // ポート名
 	public int baudRate = 9600;  // ボーレート(Arduinoに記述したものに合わせる)
@@ -32,17 +21,10 @@ public class SerialHandler : MonoBehaviour
 	private Thread thread_;
 	private bool isRunning_ = false;
 	private bool gyroOffsAdjusting_ = false; // ジャイロセンサオフセット補正中はtrue
-	private bool magOffsAdjusting_ = false; // 地磁気センサオフセット補正中はtrue
 	private System.Diagnostics.Stopwatch sw = new System.Diagnostics.Stopwatch();
 
 	private string message_;
 	private bool isNewMessageReceived_ = false;
-
-#if (DEBUG)
-
-	private int dataIndex; // 再現するセンサデータの配列の添え字
-
-#endif
 
 	void Awake()
 	{
@@ -51,32 +33,8 @@ public class SerialHandler : MonoBehaviour
 
 	void Update()
 	{
-#if (DEBUG)
+		if (Input.GetKey(KeyCode.G)) gyroOffsAdjusting_ = true;
 
-
-
-		if (Input.GetKeyDown(KeyCode.RightArrow))
-		{
-			changePose(ref sensorData, 1);
-		}
-		if (Input.GetKeyDown(KeyCode.UpArrow))
-		{
-			changePose(ref sensorData, 10);
-		}
-		if (Input.GetKeyDown(KeyCode.LeftArrow))
-		{
-			changePose(ref sensorData, -1);
-		}
-		if (Input.GetKeyDown(KeyCode.DownArrow))
-		{
-			changePose(ref sensorData, -10);
-		}
-
-#else
-
-		if (Input.GetKey(KeyCode.M) && !gyroOffsAdjusting_) magOffsAdjusting_ = true;
-		if (Input.GetKey(KeyCode.G) && !magOffsAdjusting_) gyroOffsAdjusting_ = true;
-		
 
 		if (isNewMessageReceived_)
 		{
@@ -90,18 +48,15 @@ public class SerialHandler : MonoBehaviour
 				double[] sensorData = Array.ConvertAll(msgArr, double.Parse);
 
 				//Debug.Log($"{sensorData[3]} {sensorData[4]} {sensorData[5]} ");
-				if (magOffsAdjusting_)
-				{
-					magOffsAdjusting_ = !adjustMagOffs(sensorData);
-				}
-				else if (gyroOffsAdjusting_)
+				if (gyroOffsAdjusting_)
 				{
 					gyroOffsAdjusting_ = !adjustGyroOffs(sensorData);
 				}
-				else if (Input.GetKey(KeyCode.R)) resetMag(sensorData);
 				else
 				{
-					rotate(sensorData, cube, i2cInterval);
+					rotate(sensorData, cube1, i2cInterval, alpha1);
+					rotate(sensorData, cube2, i2cInterval, alpha2);
+					rotate(sensorData, cube3, i2cInterval, alpha3);
 				}
 			}
 			catch
@@ -113,7 +68,6 @@ public class SerialHandler : MonoBehaviour
 		}
 		isNewMessageReceived_ = false;
 
-#endif
 	}
 
 	void OnDestroy()
@@ -123,10 +77,6 @@ public class SerialHandler : MonoBehaviour
 
 	private void Open()
 	{
-#if (DEBUG)
-
-#else
-
 		serialPort_ = new SerialPort(portName, baudRate, Parity.None, 8, StopBits.One);
 
 		serialPort_.Open();
@@ -137,8 +87,6 @@ public class SerialHandler : MonoBehaviour
 		thread_.Start();
 
 		sw.Start();
-
-#endif
 	}
 
 	private void Close()
@@ -173,74 +121,4 @@ public class SerialHandler : MonoBehaviour
 			}
 		}
 	}
-
-#if (DEBUG)
-
-	private void changePose(ref double[][] sensorData, int indexDifference)
-	{
-		dataIndex += indexDifference;
-		if (dataIndex < 0) { dataIndex = 0; return; }
-		else if (dataIndex >= sensorData.Length) { dataIndex = sensorData.Length - 1; return; }
-
-		debugRotate(rotateData[dataIndex], cube);
-
-		string sensorDataList = "sensor data: acc: ";
-		for (int i = 0; i < 3; i++)
-		{
-			sensorDataList += $"{sensorData[dataIndex][i]}, ";
-		}
-		sensorDataList += "gyro: ";
-		for (int i = 0; i < 3; i++)
-		{
-			sensorDataList += $"{sensorData[dataIndex][i + 3]}, ";
-		}
-		sensorDataList += $"interval: {sensorData[dataIndex][9]}";
-		Debug.Log(sensorDataList);
-
-		double rotation;
-		string gyroRotateDataList = "gyro: ";
-		for (int i = 0; i < 3; i++)
-		{
-#if RADIAN
-			rotation = rotateData[dataIndex][i];
-#else
-			rotation = rotateData[dataIndex][i] * 180.0 / PI;
-#endif
-			gyroRotateDataList += $"{rotation}, ";
-		}
-		Debug.Log(gyroRotateDataList);
-
-		string accRotateDataList = "acc ";
-		for (int i = 0; i < 3; i++)
-		{
-#if RADIAN
-			rotation = rotateData[dataIndex][i + 3];
-#else
-			rotation = rotateData[dataIndex][i + 3] * 180.0 / PI;
-#endif
-			accRotateDataList += $"{rotation}, ";
-		}
-		Debug.Log(accRotateDataList);
-
-		string fusionRotateDataList = "fus ";
-		for (int i = 0; i < 2; i++)
-		{
-			rotation = alpha * rotateData[dataIndex][i] + (1 - alpha) * rotateData[dataIndex][i + 3];
-#if !RADIAN
-			rotation *= 180.0 / PI;
-#endif
-			fusionRotateDataList += $"{rotation}, ";
-		}
-#if RADIAN
-		rotation = rotateData[dataIndex][2];
-#else
-		rotation = rotateData[dataIndex][2] * 180.0 / PI;
-#endif
-		fusionRotateDataList += $"{rotation}, ";
-		Debug.Log(fusionRotateDataList);
-		Debug.Log("");
-	}
-
-#endif
-
-	}
+}
